@@ -1,1 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GullyLINK - Find Street Vendors</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        #map { height: 100vh; width: 100%; }
+        #menu-modal { display: none; position: fixed; bottom: 0; width: 100%; background: white; border-radius: 20px 20px 0 0; box-shadow: 0 -2px 10px rgba(0,0,0,0.2); padding: 20px; z-index: 1000; box-sizing: border-box; }
+        .vendor-header { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
+        .menu-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
+        .btn { background: #ff4500; color: white; border: none; padding: 10px 20px; width: 100%; border-radius: 5px; font-size: 16px; margin-top: 10px; }
+    </style>
+</head>
+<body>
 
+    <div id="map"></div>
+
+    <div id="menu-modal">
+        <div class="vendor-header">
+            <h2 id="v-name">Vendor Name</h2>
+            <span id="v-rating">⭐ 4.5</span>
+        </div>
+        <div id="menu-items">
+            </div>
+        <button class="btn" onclick="placeOrder()">Place Order</button>
+        <button style="background:transparent; color:#333; margin-top:5px;" class="btn" onclick="closeMenu()">Close</button>
+    </div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        // 1. Initialize Map
+        const map = L.map('map').setView([26.2183, 78.1828], 14); // Gwalior Coords
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        // 2. Realtime Connection
+        const ws = new WebSocket("ws://localhost:8000/ws/user");
+        const vendors = {}; // Store markers by ID
+
+        // Custom Icons
+        const icons = {
+            "food": L.icon({iconUrl: 'https://cdn-icons-png.flaticon.com/512/3081/3081096.png', iconSize: [40, 40]}),
+            "veg": L.icon({iconUrl: 'https://cdn-icons-png.flaticon.com/512/2224/2224256.png', iconSize: [40, 40]})
+        };
+
+        let currentVendorId = null;
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === "vendor_moved") {
+                const { vendor_id, location, icon } = data;
+                
+                // If marker exists, move it. If not, create it.
+                if (vendors[vendor_id]) {
+                    vendors[vendor_id].setLatLng([location.lat, location.lng]);
+                } else {
+                    const marker = L.marker([location.lat, location.lng], {
+                        icon: icons[icon] || icons['food']
+                    }).addTo(map);
+                    
+                    // Click to Open Menu
+                    marker.on('click', () => openMenu(vendor_id));
+                    vendors[vendor_id] = marker;
+                }
+            }
+        };
+
+        // 3. Menu Logic
+        const mockMenu = [
+            {name: "Special Poha", price: 20},
+            {name: "Masala Chai", price: 10},
+            {name: "Samosa (2pcs)", price: 25}
+        ];
+
+        function openMenu(vid) {
+            currentVendorId = vid;
+            document.getElementById('v-name').innerText = "Vendor #" + vid;
+            const list = document.getElementById('menu-items');
+            list.innerHTML = "";
+            
+            mockMenu.forEach(item => {
+                list.innerHTML += `
+                    <div class="menu-item">
+                        <span>${item.name}</span>
+                        <b>₹${item.price}</b>
+                    </div>
+                `;
+            });
+            document.getElementById('menu-modal').style.display = 'block';
+        }
+
+        function closeMenu() {
+            document.getElementById('menu-modal').style.display = 'none';
+        }
+
+        // 4. Order Logic
+        async function placeOrder() {
+            if(!currentVendorId) return;
+            
+            // Get user location for the vendor route
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                const orderData = {
+                    vendor_id: currentVendorId,
+                    user_location: {lat: pos.coords.latitude, lng: pos.coords.longitude},
+                    items: mockMenu, // Sending full menu as order for MVP simplicity
+                    total: 55
+                };
+
+                const res = await fetch("http://localhost:8000/api/order", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(orderData)
+                });
+                
+                const response = await res.json();
+                alert("Order Sent! ID: " + response.order_id);
+                closeMenu();
+            });
+        }
+    </script>
+</body>
+</html>
